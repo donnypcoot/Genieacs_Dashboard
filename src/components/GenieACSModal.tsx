@@ -23,7 +23,10 @@ import {
   Copy,
   ChevronDown,
   ChevronUp,
-  HelpCircle
+  HelpCircle,
+  Search,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { GenieACSConfig, GenieACSDevice, Customer } from '../types/ftth';
 import { testGenieAcsConnection, GenieAcsTestResult } from '../services/genieAcs';
@@ -77,6 +80,29 @@ export const GenieACSModal: React.FC<GenieACSModalProps> = ({
   const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
   const [pastedJsonText, setPastedJsonText] = useState('');
   const [pasteError, setPasteError] = useState<string | null>(null);
+
+  // Pagination & Search for 500+ CPEs
+  const [deviceSearch, setDeviceSearch] = useState('');
+  const [devicePage, setDevicePage] = useState(1);
+  const devicePageSize = 50;
+
+  const filteredDevices = devices.filter(d => {
+    const q = deviceSearch.toLowerCase().trim();
+    if (!q) return true;
+    return (
+      d.serialNumber.toLowerCase().includes(q) ||
+      d.ipAddress.toLowerCase().includes(q) ||
+      d.manufacturer.toLowerCase().includes(q) ||
+      d.modelName.toLowerCase().includes(q) ||
+      (d.matchedCustomerName && d.matchedCustomerName.toLowerCase().includes(q))
+    );
+  });
+
+  const totalDevicePages = Math.ceil(filteredDevices.length / devicePageSize) || 1;
+  const paginatedDevices = filteredDevices.slice(
+    (devicePage - 1) * devicePageSize,
+    devicePage * devicePageSize
+  );
 
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -832,6 +858,26 @@ export const GenieACSModal: React.FC<GenieACSModalProps> = ({
                 </div>
               </div>
 
+              {/* Search Bar for CPE Devices */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-950 p-3 rounded-2xl border border-slate-800">
+                <div className="relative w-full sm:w-80">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Cari SN, IP, Vendor, Model ONT..."
+                    value={deviceSearch}
+                    onChange={e => {
+                      setDeviceSearch(e.target.value);
+                      setDevicePage(1);
+                    }}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 font-mono"
+                  />
+                </div>
+                <div className="text-xs text-slate-400 font-mono">
+                  Total: <strong className="text-cyan-400">{filteredDevices.length}</strong> perangkat TR-069
+                </div>
+              </div>
+
               <div className="bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-900 text-slate-400 border-b border-slate-800 font-mono uppercase text-[10px]">
@@ -845,7 +891,7 @@ export const GenieACSModal: React.FC<GenieACSModalProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
-                    {devices.map(device => {
+                    {paginatedDevices.map(device => {
                       const isRebooting = rebootingId === device._id;
 
                       return (
@@ -901,6 +947,45 @@ export const GenieACSModal: React.FC<GenieACSModalProps> = ({
                     })}
                   </tbody>
                 </table>
+
+                {/* Pagination Footer */}
+                {filteredDevices.length > 0 && (
+                  <div className="p-3.5 bg-slate-900/80 border-t border-slate-800 flex items-center justify-between text-xs">
+                    <span className="text-slate-400">
+                      Menampilkan <strong className="text-white font-mono">{((devicePage - 1) * devicePageSize) + 1}</strong> - <strong className="text-white font-mono">{Math.min(devicePage * devicePageSize, filteredDevices.length)}</strong> dari <strong className="text-cyan-400 font-mono">{filteredDevices.length}</strong> perangkat
+                    </span>
+
+                    <div className="flex items-center space-x-2">
+                      <button
+                        type="button"
+                        onClick={() => setDevicePage(prev => Math.max(1, prev - 1))}
+                        disabled={devicePage === 1}
+                        className="p-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 border border-slate-700 rounded-lg text-slate-300 cursor-pointer disabled:cursor-not-allowed"
+                        title="Halaman Sebelumnya"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+
+                      <div className="flex items-center space-x-1 font-mono text-xs">
+                        <span className="px-2 py-0.5 bg-cyan-950 text-cyan-300 border border-cyan-800 rounded font-bold">
+                          {devicePage}
+                        </span>
+                        <span className="text-slate-500">/</span>
+                        <span className="text-slate-400">{totalDevicePages}</span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setDevicePage(prev => Math.min(totalDevicePages, prev + 1))}
+                        disabled={devicePage >= totalDevicePages}
+                        className="p-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 border border-slate-700 rounded-lg text-slate-300 cursor-pointer disabled:cursor-not-allowed"
+                        title="Halaman Berikutnya"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

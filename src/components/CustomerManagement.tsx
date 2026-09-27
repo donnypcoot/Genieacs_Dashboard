@@ -22,7 +22,9 @@ import {
   RefreshCw,
   X,
   Server,
-  Cloud
+  Cloud,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { Customer, FTTHNode, UserRole, CustomerStatus, GenieACSConfig } from '../types/ftth';
 
@@ -87,6 +89,10 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
     ontSerialNumber: `ZTEG${Math.random().toString(36).substring(2, 8).toUpperCase()}`
   });
 
+  // Pagination state for handling large datasets (500+ CPEs)
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+
   // Filter customers
   const filteredCustomers = customers.filter(c => {
     const matchesSearch = 
@@ -101,6 +107,9 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
 
     return matchesSearch && matchesArea && matchesStatus;
   });
+
+  const totalPages = Math.ceil(filteredCustomers.length / pageSize) || 1;
+  const paginatedCustomers = filteredCustomers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   // Calculate quick stats
   const totalCount = customers.length;
@@ -362,7 +371,7 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
                   </td>
                 </tr>
               ) : (
-                filteredCustomers.map(customer => {
+                paginatedCustomers.map(customer => {
                   const linkedOdp = nodes.find(n => n.id === customer.odpId);
                   const isLos = customer.status === 'los_down';
                   const isHighLoss = customer.status === 'high_loss';
@@ -486,6 +495,64 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Footer */}
+        {filteredCustomers.length > 0 && (
+          <div className="p-4 bg-slate-950/90 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+            <div className="flex items-center space-x-3 text-slate-400">
+              <span>
+                Menampilkan <strong className="text-white font-mono">{((currentPage - 1) * pageSize) + 1}</strong> - <strong className="text-white font-mono">{Math.min(currentPage * pageSize, filteredCustomers.length)}</strong> dari <strong className="text-cyan-400 font-mono">{filteredCustomers.length}</strong> pelanggan
+              </span>
+              <div className="flex items-center space-x-1.5 pl-3 border-l border-slate-800">
+                <span className="text-[11px] text-slate-500">Per halaman:</span>
+                <select
+                  value={pageSize}
+                  onChange={e => {
+                    setPageSize(Number(e.target.value));
+                    setCurrentPage(1);
+                  }}
+                  className="bg-slate-900 border border-slate-700 text-slate-300 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-cyan-400"
+                >
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                  <option value={200}>200</option>
+                  <option value={1000}>Semua ({filteredCustomers.length})</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                disabled={currentPage === 1}
+                className="p-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-30 border border-slate-800 rounded-lg text-slate-300 cursor-pointer disabled:cursor-not-allowed"
+                title="Halaman Sebelumnya"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+
+              <div className="flex items-center space-x-1 font-mono text-xs">
+                <span className="px-2.5 py-1 bg-cyan-950 text-cyan-300 border border-cyan-800 rounded-lg font-bold">
+                  {currentPage}
+                </span>
+                <span className="text-slate-500">/</span>
+                <span className="text-slate-400 px-1">{totalPages}</span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                disabled={currentPage >= totalPages}
+                className="p-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-30 border border-slate-800 rounded-lg text-slate-300 cursor-pointer disabled:cursor-not-allowed"
+                title="Halaman Berikutnya"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Modal Registrasi Pelanggan Baru */}
