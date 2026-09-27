@@ -388,10 +388,10 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
                       {/* Package Plan */}
                       <td className="py-3.5 px-4">
                         <span className="bg-slate-950 px-2.5 py-1 rounded-md text-slate-200 font-medium border border-slate-800 inline-block">
-                          {customer.packagePlan}
+                          {String(customer.packagePlan || 'Standard')}
                         </span>
                         <div className="text-[10px] text-slate-400 mt-1 font-mono">
-                          Rp {customer.monthlyFee.toLocaleString('id-ID')}/bln
+                          Rp {(customer.monthlyFee || 0).toLocaleString('id-ID')}/bln
                         </div>
                       </td>
 
@@ -406,17 +406,17 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
                           <ExternalLink className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
                         </button>
                         <div className="text-[11px] text-slate-300 mt-0.5">
-                          Port Splitter <span className="font-bold text-amber-400">#{customer.odpPort}</span>
+                          Port Splitter <span className="font-bold text-amber-400">#{customer.odpPort || 1}</span>
                         </div>
                         <div className="text-[10px] text-slate-400">
-                          Drop cable: {customer.dropCableLengthMeters}m
+                          Drop cable: {customer.dropCableLengthMeters || 0}m
                         </div>
                       </td>
 
                       {/* ONT SN & IP */}
                       <td className="py-3.5 px-4 font-mono text-[11px]">
-                        <div className="text-slate-300">{customer.ontSerialNumber}</div>
-                        <div className="text-slate-400">{customer.ipAddress}</div>
+                        <div className="text-slate-300">{String(customer.ontSerialNumber || '-')}</div>
+                        <div className="text-slate-400">{String(customer.ipAddress || '-')}</div>
                       </td>
 
                       {/* Optical Power Gauge */}
@@ -429,7 +429,7 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
                               ? 'text-amber-400' 
                               : 'text-emerald-400'
                           }`}>
-                            {customer.rxOpticalPower} dBm
+                            {typeof customer.rxOpticalPower === 'number' ? customer.rxOpticalPower : -20} dBm
                           </span>
                         </div>
                         <div className="text-[10px] text-slate-400 mt-0.5">

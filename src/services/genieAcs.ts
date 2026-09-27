@@ -52,20 +52,32 @@ export function getAcsHeaders(config: GenieACSConfig): HeadersInit {
  * - "InternetGatewayDevice.DeviceInfo.SerialNumber": { "_value": "ZTEGC123", "_type": "xsd:string" }
  * - or nested objects
  * - or primitive strings
+ * GUARANTEED to return string or undefined, NEVER an object!
  */
-function extractTr069Value(device: any, path: string): any {
+function extractTr069Value(device: any, path: string): string | undefined {
   if (!device || !path) return undefined;
 
-  // Direct key lookup
-  if (device[path] !== undefined) {
-    const val = device[path];
-    if (val && typeof val === 'object' && '_value' in val) {
-      return val._value;
+  // Helper to extract clean primitive string from any value
+  const cleanPrimitive = (val: any): string | undefined => {
+    if (val === undefined || val === null) return undefined;
+    if (typeof val === 'object') {
+      if ('_value' in val) {
+        const inner = val._value;
+        if (typeof inner === 'object' || inner === undefined || inner === null) return undefined;
+        return String(inner).trim();
+      }
+      return undefined; // Tree object without _value
     }
-    return val;
+    return String(val).trim();
+  };
+
+  // 1. Direct key lookup (e.g. flat projection key)
+  if (path in device) {
+    const res = cleanPrimitive(device[path]);
+    if (res !== undefined) return res;
   }
 
-  // Nested dot lookup (e.g. DeviceID.SerialNumber)
+  // 2. Nested dot lookup (e.g. DeviceID.SerialNumber)
   const parts = path.split('.');
   let current = device;
   for (const part of parts) {
@@ -78,10 +90,8 @@ function extractTr069Value(device: any, path: string): any {
   }
 
   if (current !== undefined) {
-    if (current && typeof current === 'object' && '_value' in current) {
-      return current._value;
-    }
-    return current;
+    const res = cleanPrimitive(current);
+    if (res !== undefined) return res;
   }
 
   return undefined;
@@ -92,6 +102,11 @@ function extractTr069Value(device: any, path: string): any {
  */
 function parseOpticalPower(rawVal: any): number {
   if (rawVal === undefined || rawVal === null) return -20.0;
+  if (typeof rawVal === 'object' && '_value' in rawVal) {
+    rawVal = rawVal._value;
+  }
+  if (typeof rawVal === 'object') return -20.0;
+
   const num = parseFloat(String(rawVal));
   if (isNaN(num)) return -20.0;
 
@@ -301,51 +316,56 @@ export function parseRawGenieAcsJson(rawDevices: any[], config: GenieACSConfig):
   }
 
   return rawDevices.map((raw: any, index: number) => {
-    const id = raw._id || `cpe-${index}`;
+    const cleanId = String(raw._id || `cpe-${index}`);
     
     // Serial Number: check DeviceID.SerialNumber, custom mapping, or standard TR-069 paths
-    const serialNumber = 
-      extractTr069Value(raw, config.parameterMapping.serialNumber) ||
+    const rawSn = 
+      extractTr069Value(raw, config.parameterMapping?.serialNumber) ||
       extractTr069Value(raw, 'DeviceID.SerialNumber') ||
       extractTr069Value(raw, 'Device.DeviceInfo.SerialNumber') ||
       extractTr069Value(raw, 'InternetGatewayDevice.DeviceInfo.SerialNumber') ||
-      id.split('-').pop() ||
+      (cleanId.includes('-') ? cleanId.split('-').pop() : '') ||
       `ONT-${index + 1}`;
+    const serialNumber = String(rawSn || `ONT-${index + 1}`).trim();
 
     // Manufacturer
-    const manufacturer = 
+    const rawMfg = 
       extractTr069Value(raw, 'DeviceID.Manufacturer') ||
       extractTr069Value(raw, 'Device.DeviceInfo.Manufacturer') ||
       extractTr069Value(raw, 'InternetGatewayDevice.DeviceInfo.Manufacturer') ||
-      (id.includes('ZTE') ? 'ZTE' : id.includes('HW') || id.includes('Huawei') ? 'Huawei' : id.includes('FIB') ? 'Fiberhome' : 'CPE Device');
+      (cleanId.includes('ZTE') ? 'ZTE' : cleanId.includes('HW') || cleanId.includes('Huawei') ? 'Huawei' : cleanId.includes('FIB') ? 'Fiberhome' : 'CPE Device');
+    const manufacturer = String(rawMfg || 'CPE Device').trim();
 
     // Model Name
-    const modelName = 
-      extractTr069Value(raw, config.parameterMapping.modelName) ||
+    const rawModel = 
+      extractTr069Value(raw, config.parameterMapping?.modelName) ||
       extractTr069Value(raw, 'DeviceID.ProductClass') ||
       extractTr069Value(raw, 'Device.DeviceInfo.ModelName') ||
       extractTr069Value(raw, 'InternetGatewayDevice.DeviceInfo.ModelName') ||
       'GPON ONT';
+    const modelName = String(rawModel || 'GPON ONT').trim();
 
     // Software Version
-    const softwareVersion = 
-      extractTr069Value(raw, config.parameterMapping.softwareVersion) ||
+    const rawVer = 
+      extractTr069Value(raw, config.parameterMapping?.softwareVersion) ||
       extractTr069Value(raw, 'Device.DeviceInfo.SoftwareVersion') ||
       extractTr069Value(raw, 'InternetGatewayDevice.DeviceInfo.SoftwareVersion') ||
       'V1.0.0';
+    const softwareVersion = String(rawVer || 'V1.0.0').trim();
 
     // IP Address
-    const ipAddress = 
-      extractTr069Value(raw, config.parameterMapping.ipAddress) ||
+    const rawIp = 
+      extractTr069Value(raw, config.parameterMapping?.ipAddress) ||
       extractTr069Value(raw, 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress') ||
       extractTr069Value(raw, 'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress') ||
       extractTr069Value(raw, 'Device.IP.Interface.1.IPv4Address.1.IPAddress') ||
       extractTr069Value(raw, '_ip') ||
       `10.20.${Math.floor(index / 250) + 1}.${(index % 250) + 10}`;
+    const ipAddress = String(rawIp || `10.20.1.${(index % 250) + 10}`).trim();
 
     // Optical Rx Power (dBm)
     const rawRxPower = 
-      extractTr069Value(raw, config.parameterMapping.rxOpticalPower) ||
+      extractTr069Value(raw, config.parameterMapping?.rxOpticalPower) ||
       extractTr069Value(raw, 'InternetGatewayDevice.WANDevice.1.WANOponDevice.OpticalRxPower') ||
       extractTr069Value(raw, 'InternetGatewayDevice.WANDevice.1.WANOponDevice.OpticalPowerRx') ||
       extractTr069Value(raw, 'Device.Optical.Interface.1.RxPower') ||
@@ -356,38 +376,43 @@ export function parseRawGenieAcsJson(rawDevices: any[], config: GenieACSConfig):
 
     // Optical Tx Power (dBm)
     const rawTxPower = 
-      extractTr069Value(raw, config.parameterMapping.txOpticalPower) ||
+      extractTr069Value(raw, config.parameterMapping?.txOpticalPower) ||
       extractTr069Value(raw, 'InternetGatewayDevice.WANDevice.1.WANOponDevice.OpticalTxPower') ||
       extractTr069Value(raw, 'InternetGatewayDevice.WANDevice.1.WANOponDevice.OpticalPowerTx') ||
       extractTr069Value(raw, 'Device.Optical.Interface.1.TxPower');
 
     const txOpticalPower = rawTxPower !== undefined ? parseOpticalPower(rawTxPower) : 2.1;
 
-    // Last Inform
+    // Last Inform safely handled
+    let rawInformVal = raw._lastInform;
+    if (rawInformVal && typeof rawInformVal === 'object' && '_value' in rawInformVal) {
+      rawInformVal = rawInformVal._value;
+    }
     let lastInform = 'Tidak Diketahui';
-    if (raw._lastInform) {
+    let isOnline = true;
+
+    if (rawInformVal && typeof rawInformVal !== 'object') {
       try {
-        const date = new Date(raw._lastInform);
-        lastInform = date.toLocaleString('id-ID', {
-          day: '2-digit',
-          month: 'short',
-          hour: '2-digit',
-          minute: '2-digit'
-        });
+        const date = new Date(rawInformVal);
+        if (!isNaN(date.getTime())) {
+          lastInform = date.toLocaleString('id-ID', {
+            day: '2-digit',
+            month: 'short',
+            hour: '2-digit',
+            minute: '2-digit'
+          });
+          const diffMs = Date.now() - date.getTime();
+          isOnline = diffMs < 15 * 60 * 1000;
+        } else {
+          lastInform = String(rawInformVal);
+        }
       } catch {
-        lastInform = String(raw._lastInform);
+        lastInform = String(rawInformVal);
       }
     }
 
-    // Status (Online if last inform < 15 minutes ago, or active)
-    let isOnline = true;
-    if (raw._lastInform) {
-      const diffMs = Date.now() - new Date(raw._lastInform).getTime();
-      isOnline = diffMs < 15 * 60 * 1000;
-    }
-
     return {
-      _id: id,
+      _id: cleanId,
       serialNumber,
       manufacturer,
       modelName,
@@ -505,61 +530,72 @@ export function syncDevicesWithCustomers(
 
   const updatedCustomers = [...existingCustomers];
 
-  for (const device of realDevices) {
+  for (let i = 0; i < realDevices.length; i++) {
+    const device = realDevices[i];
+    if (!device) continue;
+
+    const cleanSn = String(device.serialNumber || `ONT-${i + 1}`).trim();
+    const cleanModel = `${String(device.manufacturer || 'ONT')} ${String(device.modelName || 'CPE')}`.trim();
+    const cleanIp = String(device.ipAddress || '10.20.1.1').trim();
+    const cleanInform = String(device.lastInform || 'Baru saja');
+    const rxPower = typeof device.rxOpticalPower === 'number' && !isNaN(device.rxOpticalPower) ? device.rxOpticalPower : -20.0;
+    const txPower = typeof device.txOpticalPower === 'number' && !isNaN(device.txOpticalPower) ? device.txOpticalPower : 2.1;
+
     const custIndex = updatedCustomers.findIndex(
-      c => c.ontSerialNumber.trim().toUpperCase() === device.serialNumber.trim().toUpperCase()
+      c => String(c.ontSerialNumber || '').trim().toUpperCase() === cleanSn.toUpperCase()
     );
 
     if (custIndex >= 0) {
       // Existing customer: update metrics from real GenieACS ONT
       matchedCount++;
       const current = updatedCustomers[custIndex];
-      const newStatus = device.status === 'offline' || device.rxOpticalPower < -28
+      const newStatus = device.status === 'offline' || rxPower < -28
         ? 'los_down'
-        : device.rxOpticalPower < -24
+        : rxPower < -24
         ? 'high_loss'
         : 'active';
 
       updatedCustomers[custIndex] = {
         ...current,
-        rxOpticalPower: device.rxOpticalPower,
-        txOpticalPower: device.txOpticalPower,
-        ipAddress: device.ipAddress,
-        ontModel: `${device.manufacturer} ${device.modelName}`,
+        rxOpticalPower: rxPower,
+        txOpticalPower: txPower,
+        ipAddress: cleanIp,
+        ontModel: cleanModel,
         status: newStatus,
-        lastOnlineTime: device.lastInform
+        lastOnlineTime: cleanInform
       };
     } else {
       // Device exists in GenieACS but not in customer table: auto-import as real customer!
       newImportedCount++;
-      const newId = `cust-genieacs-${device.serialNumber.toLowerCase()}`;
-      const newStatus = device.status === 'offline' || device.rxOpticalPower < -28
+      const safeSnSlug = cleanSn.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+      const newId = `cust-genieacs-${newImportedCount}-${safeSnSlug}`;
+      const newStatus = device.status === 'offline' || rxPower < -28
         ? 'los_down'
-        : device.rxOpticalPower < -24
+        : rxPower < -24
         ? 'high_loss'
         : 'active';
 
       updatedCustomers.push({
         id: newId,
-        accountNumber: `GNC-${device.serialNumber.slice(-6).toUpperCase()}`,
-        name: `Pelanggan ONT (${device.serialNumber})`,
+        accountNumber: `GNC-${cleanSn.slice(-6).toUpperCase()}`,
+        name: `Pelanggan ONT (${cleanSn})`,
         phone: '0812-XXXX-XXXX',
-        email: `${device.serialNumber.toLowerCase()}@customer.net`,
-        address: `Alamat Pelanggan ONT ${device.serialNumber}`,
+        email: `${safeSnSlug}@customer.net`,
+        address: `Alamat Pelanggan ONT ${cleanSn}`,
         area: 'Cluster Melati',
         packagePlan: 'Home Fiber 50 Mbps',
         monthlyFee: 250000,
         odpId: defaultOdpId,
         odpPort: (newImportedCount % 8) + 1,
-        ontSerialNumber: device.serialNumber,
-        ontModel: `${device.manufacturer} ${device.modelName}`,
-        rxOpticalPower: device.rxOpticalPower,
-        txOpticalPower: device.txOpticalPower,
-        ipAddress: device.ipAddress,
+        ontSerialNumber: cleanSn,
+        ontModel: cleanModel,
+        rxOpticalPower: rxPower,
+        txOpticalPower: txPower,
+        ipAddress: cleanIp,
         status: newStatus,
         dropCableLengthMeters: 45,
         joinDate: new Date().toISOString().split('T')[0],
-        lastOnlineTime: device.lastInform,
+        lastOnlineTime: cleanInform,
         coordinates: {
           x: 320 + ((newImportedCount * 35) % 400),
           y: 220 + ((newImportedCount * 25) % 250)

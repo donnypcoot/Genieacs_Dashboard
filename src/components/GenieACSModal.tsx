@@ -86,16 +86,17 @@ export const GenieACSModal: React.FC<GenieACSModalProps> = ({
   const [devicePage, setDevicePage] = useState(1);
   const devicePageSize = 50;
 
-  const filteredDevices = devices.filter(d => {
-    const q = deviceSearch.toLowerCase().trim();
+  const safeDevices = Array.isArray(devices) ? devices : [];
+  const filteredDevices = safeDevices.filter(d => {
+    if (!d || typeof d !== 'object') return false;
+    const q = (deviceSearch || '').toLowerCase().trim();
     if (!q) return true;
-    return (
-      d.serialNumber.toLowerCase().includes(q) ||
-      d.ipAddress.toLowerCase().includes(q) ||
-      d.manufacturer.toLowerCase().includes(q) ||
-      d.modelName.toLowerCase().includes(q) ||
-      (d.matchedCustomerName && d.matchedCustomerName.toLowerCase().includes(q))
-    );
+    const sn = String(d.serialNumber || '').toLowerCase();
+    const ip = String(d.ipAddress || '').toLowerCase();
+    const mfg = String(d.manufacturer || '').toLowerCase();
+    const model = String(d.modelName || '').toLowerCase();
+    const cust = String(d.matchedCustomerName || '').toLowerCase();
+    return sn.includes(q) || ip.includes(q) || mfg.includes(q) || model.includes(q) || cust.includes(q);
   });
 
   const totalDevicePages = Math.ceil(filteredDevices.length / devicePageSize) || 1;
@@ -891,40 +892,49 @@ export const GenieACSModal: React.FC<GenieACSModalProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
-                    {paginatedDevices.map(device => {
-                      const isRebooting = rebootingId === device._id;
+                    {paginatedDevices.map((device, idx) => {
+                      if (!device) return null;
+                      const devId = String(device._id || `dev-${idx}`);
+                      const isRebooting = rebootingId === devId;
+                      const sn = typeof device.serialNumber === 'string' ? device.serialNumber : String(device.serialNumber || '-');
+                      const mfg = typeof device.manufacturer === 'string' ? device.manufacturer : 'CPE Device';
+                      const model = typeof device.modelName === 'string' ? device.modelName : 'ONT';
+                      const fw = typeof device.softwareVersion === 'string' ? device.softwareVersion : '-';
+                      const ip = typeof device.ipAddress === 'string' ? device.ipAddress : '-';
+                      const rx = typeof device.rxOpticalPower === 'number' && !isNaN(device.rxOpticalPower) ? device.rxOpticalPower : -20.0;
+                      const inform = typeof device.lastInform === 'string' ? device.lastInform : 'Aktif';
 
                       return (
-                        <tr key={device._id} className="hover:bg-slate-900/40">
+                        <tr key={devId} className="hover:bg-slate-900/40">
                           <td className="py-3 px-4">
-                            <div className="font-bold text-cyan-300">{device.serialNumber}</div>
-                            <div className="text-[10px] text-slate-400 font-sans">{device.manufacturer}</div>
+                            <div className="font-bold text-cyan-300">{sn}</div>
+                            <div className="text-[10px] text-slate-400 font-sans">{mfg}</div>
                           </td>
                           <td className="py-3 px-4">
-                            <div className="text-slate-200">{device.modelName}</div>
-                            <div className="text-[10px] text-slate-400">{device.softwareVersion}</div>
+                            <div className="text-slate-200">{model}</div>
+                            <div className="text-[10px] text-slate-400">{fw}</div>
                           </td>
                           <td className="py-3 px-4 text-slate-300">
-                            {device.ipAddress}
+                            {ip}
                           </td>
                           <td className="py-3 px-4">
                             <span className={`font-bold ${
-                              device.rxOpticalPower < -28 
+                              rx < -28 
                                 ? 'text-rose-400' 
-                                : device.rxOpticalPower < -24 
+                                : rx < -24 
                                 ? 'text-amber-400' 
                                 : 'text-emerald-400'
                             }`}>
-                              {device.rxOpticalPower} dBm
+                              {rx} dBm
                             </span>
                             <span className="text-[9px] text-slate-500 block font-sans">
-                              Inform: {device.lastInform}
+                              Inform: {inform}
                             </span>
                           </td>
                           <td className="py-3 px-4 font-sans">
                             {device.matchedCustomerName ? (
                               <div>
-                                <span className="font-semibold text-slate-200 block text-xs">{device.matchedCustomerName}</span>
+                                <span className="font-semibold text-slate-200 block text-xs">{String(device.matchedCustomerName)}</span>
                                 <span className="text-[10px] text-emerald-400 font-mono">Tersinkronisasi</span>
                               </div>
                             ) : (
@@ -933,7 +943,7 @@ export const GenieACSModal: React.FC<GenieACSModalProps> = ({
                           </td>
                           <td className="py-3 px-4 text-right font-sans">
                             <button
-                              onClick={() => handleTriggerReboot(device._id)}
+                              onClick={() => handleTriggerReboot(devId)}
                               disabled={isRebooting}
                               className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center space-x-1 ml-auto cursor-pointer border border-slate-700"
                               title="Kirim perintah Reboot via TR-069 NBI Task"
