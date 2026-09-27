@@ -1,10 +1,27 @@
 import { GenieACSConfig, GenieACSDevice, Customer } from '../types/ftth';
 
+export interface GenieAcsTestResult {
+  success: boolean;
+  message: string;
+  latencyMs: number;
+  totalDevices: number;
+  diagnosisType?: 'mixed_content' | 'cors_or_offline' | 'timeout' | 'http_error' | 'auth_error' | 'none';
+  suggestion?: string;
+  testedUrl?: string;
+}
+
 /**
  * Helper to get clean base URL for GenieACS NBI
  */
 export function getCleanAcsUrl(url: string): string {
-  let clean = url.trim();
+  let clean = (url || '').trim();
+  if (!clean) return '/genieacs';
+
+  // If user entered relative path without slash like "genieacs"
+  if (!clean.startsWith('http://') && !clean.startsWith('https://') && !clean.startsWith('/')) {
+    clean = '/' + clean;
+  }
+
   if (clean.endsWith('/')) {
     clean = clean.slice(0, -1);
   }
@@ -89,20 +106,43 @@ function parseOpticalPower(rawVal: any): number {
 }
 
 /**
- * Test Connection to GenieACS NBI API
+ * Test Connection to GenieACS NBI API with detailed diagnosis
  */
-export async function testGenieAcsConnection(config: GenieACSConfig): Promise<{
-  success: boolean;
-  message: string;
-  latencyMs: number;
-  totalDevices: number;
-}> {
+export async function testGenieAcsConnection(config: GenieACSConfig): Promise<GenieAcsTestResult> {
   const startTime = performance.now();
   const baseUrl = getCleanAcsUrl(config.serverUrl);
+  const isHttpsPage = typeof window !== 'undefined' && window.location.protocol === 'https:';
+  const isCurrentHostLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
+  // Check 1: Mixed Content Detection (Browser will automatically block HTTP inside HTTPS)
+  if (isHttpsPage && baseUrl.startsWith('http://')) {
+    return {
+      success: false,
+      message: 'Diblokir oleh Browser (Mixed Content: HTTPS memblokir HTTP)',
+      diagnosisType: 'mixed_content',
+      latencyMs: 0,
+      totalDevices: 0,
+      testedUrl: baseUrl,
+      suggestion: 'Anda mengakses dashboard ini lewat HTTPS, sehingga browser secara ketat melarang koneksi langsung ke "http://...:7557". Solusi: Ubah URL GenieACS NBI menjadi "/genieacs" (memanfaatkan reverse proxy Nginx yang sudah dibuat).'
+    };
+  }
+
+  // Check 2: Loopback to client machine detection
+  if (!isCurrentHostLocal && (baseUrl.includes('127.0.0.1:7557') || baseUrl.includes('localhost:7557'))) {
+    return {
+      success: false,
+      message: 'Kesalahan Alamat: "localhost / 127.0.0.1" merujuk ke laptop/HP Anda, bukan server VPS.',
+      diagnosisType: 'cors_or_offline',
+      latencyMs: 0,
+      totalDevices: 0,
+      testedUrl: baseUrl,
+      suggestion: 'Jika aplikasi berjalan di server Ubuntu, gunakan jalur Nginx Proxy "/genieacs", atau gunakan IP Public server Anda (misal http://103.xxx.xxx.xxx:7557).'
+    };
+  }
 
   try {
     const headers = getAcsHeaders(config);
-    // GenieACS NBI: GET /devices?limit=1 or GET /devices
+    // GenieACS NBI: GET /devices?limit=1
     const res = await fetch(`${baseUrl}/devices?limit=1`, {
       method: 'GET',
       headers,
@@ -111,13 +151,48 @@ export async function testGenieAcsConnection(config: GenieACSConfig): Promise<{
 
     const latencyMs = Math.round(performance.now() - startTime);
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
+    if (res.status === 401 || res.status === 403) {
       return {
         success: false,
-        message: `GenieACS NBI merespon error HTTP ${res.status}: ${errText || res.statusText}`,
+        message: `Autentikasi Ditolak (HTTP ${res.status} Unauthorized / Forbidden)`,
+        diagnosisType: 'auth_error',
         latencyMs,
-        totalDevices: 0
+        totalDevices: 0,
+        testedUrl: baseUrl,
+        suggestion: 'GenieACS NBI memerlukan username & password atau API Key yang valid. Silakan sesuaikan di tab Metode Autentikasi NBI.'
+      };
+    }
+
+    if (!res.ok) {
+      const rawText = await res.text().catch(() => '');
+      let cleanMessage = res.statusText;
+
+      // Detect if the 404 is coming directly from Nginx web server
+      const isNginx404 = res.status === 404 && (rawText.includes('nginx') || rawText.includes('404 Not Found'));
+      
+      let suggestion = '';
+      if (isNginx404) {
+        cleanMessage = 'Nginx Server merespon 404 Not Found: Rute "/genieacs/" belum terdaftar pada konfigurasi aktif Nginx.';
+        suggestion = 'Nginx aktif tetapi belum memiliki aturan proxy untuk "/genieacs/". Solusi: Masukkan blok "location /genieacs/ { proxy_pass http://127.0.0.1:7557/; }" ke dalam konfigurasi aktif Nginx (/etc/nginx/sites-available/default atau /etc/nginx/sites-available/geniacs) lalu reload Nginx.';
+      } else if (res.status === 404) {
+        cleanMessage = 'Endpoint GenieACS tidak ditemukan (HTTP 404).';
+        suggestion = 'Pastikan URL berujung ke port NBI 7557 dan pada Nginx "proxy_pass http://127.0.0.1:7557/;" wajib memiliki garis miring "/" di akhir.';
+      } else if (res.status === 502) {
+        cleanMessage = 'Nginx merespon 502 Bad Gateway: Service GenieACS NBI port 7557 sedang mati.';
+        suggestion = 'Service GenieACS NBI belum berjalan. Jalankan "sudo systemctl restart genieacs-nbi" di server.';
+      } else {
+        cleanMessage = `GenieACS NBI merespon HTTP ${res.status}`;
+        suggestion = 'Periksa log GenieACS di server: "sudo journalctl -u genieacs-nbi -n 50"';
+      }
+
+      return {
+        success: false,
+        message: cleanMessage,
+        diagnosisType: 'http_error',
+        latencyMs,
+        totalDevices: 0,
+        testedUrl: baseUrl,
+        suggestion
       };
     }
 
@@ -145,24 +220,34 @@ export async function testGenieAcsConnection(config: GenieACSConfig): Promise<{
     return {
       success: true,
       message: `Terhubung ke GenieACS NBI! Latensi: ${latencyMs}ms. Terdeteksi ${totalDevices} perangkat TR-069.`,
+      diagnosisType: 'none',
       latencyMs,
-      totalDevices
+      totalDevices,
+      testedUrl: baseUrl
     };
   } catch (err: any) {
     const latencyMs = Math.round(performance.now() - startTime);
     let errorDetail = err.message || 'Gagal tersambung';
+    let diagnosis: 'timeout' | 'cors_or_offline' = 'cors_or_offline';
+    let suggestion = '';
 
     if (err.name === 'TimeoutError') {
-      errorDetail = 'Koneksi timeout (lebih dari 8 detik). Pastikan port 7557 terbuka di firewall.';
-    } else if (errorDetail.includes('Failed to fetch') || errorDetail.includes('NetworkError')) {
-      errorDetail = 'Gagal menghubungi server GenieACS (Network / CORS Error). Jika mengakses lewat browser HTTPS, gunakan Nginx reverse proxy /genieacs untuk menghindari blokir CORS.';
+      diagnosis = 'timeout';
+      errorDetail = 'Koneksi timeout (lebih dari 8 detik).';
+      suggestion = 'Port 7557 mungkin tertutup firewall atau service NBI macet. Jalankan di Ubuntu: "sudo ufw allow 7557/tcp" dan "sudo systemctl restart genieacs-nbi".';
+    } else {
+      errorDetail = 'Gagal menghubungi server GenieACS (Network / CORS Error / Connection Refused).';
+      suggestion = 'Browser memblokir koneksi langsung (CORS) atau service genieacs-nbi belum aktif. Solusi terbaik: Ubah URL ke "/genieacs" (Nginx Proxy) dan pastikan service aktif dengan "sudo systemctl status genieacs-nbi".';
     }
 
     return {
       success: false,
       message: errorDetail,
+      diagnosisType: diagnosis,
       latencyMs,
-      totalDevices: 0
+      totalDevices: 0,
+      testedUrl: baseUrl,
+      suggestion
     };
   }
 }
@@ -181,8 +266,11 @@ export async function fetchRealGenieAcsDevices(config: GenieACSConfig): Promise<
   });
 
   if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(`GenieACS HTTP ${res.status}: ${errText || res.statusText}`);
+    const rawText = await res.text().catch(() => '');
+    if (res.status === 404 && (rawText.includes('nginx') || rawText.includes('404 Not Found'))) {
+      throw new Error('Nginx merespon 404: Rute "location /genieacs/" belum terdaftar pada konfigurasi aktif Nginx.');
+    }
+    throw new Error(`GenieACS HTTP ${res.status}: ${res.statusText}`);
   }
 
   const rawDevices = await res.json();
