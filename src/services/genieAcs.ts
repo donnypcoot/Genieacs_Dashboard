@@ -142,12 +142,20 @@ export function getOptimizedProjections(config: GenieACSConfig): string {
     'InternetGatewayDevice.WANDevice.1.X_FH_GponInterfaceConfig.RxPower',
     'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANIPConnection.1.ExternalIPAddress',
     'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.ExternalIPAddress',
+    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username',
+    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Password',
+    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Username',
+    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Password',
+    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.2.Username',
+    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.2.Password',
     'Device.DeviceInfo.SerialNumber',
     'Device.DeviceInfo.Manufacturer',
     'Device.DeviceInfo.ModelName',
     'Device.DeviceInfo.SoftwareVersion',
     'Device.Optical.Interface.1.RxPower',
-    'Device.IP.Interface.1.IPv4Address.1.IPAddress'
+    'Device.IP.Interface.1.IPv4Address.1.IPAddress',
+    'Device.PPP.Interface.1.Username',
+    'Device.PPP.Interface.1.Password'
   ]);
 
   if (config.parameterMapping?.serialNumber) fields.add(config.parameterMapping.serialNumber);
@@ -156,8 +164,93 @@ export function getOptimizedProjections(config: GenieACSConfig): string {
   if (config.parameterMapping?.ipAddress) fields.add(config.parameterMapping.ipAddress);
   if (config.parameterMapping?.modelName) fields.add(config.parameterMapping.modelName);
   if (config.parameterMapping?.softwareVersion) fields.add(config.parameterMapping.softwareVersion);
+  if (config.parameterMapping?.pppoeUsername) fields.add(config.parameterMapping.pppoeUsername);
+  if (config.parameterMapping?.pppoePassword) fields.add(config.parameterMapping.pppoePassword);
 
   return Array.from(fields).join(',');
+}
+
+/**
+ * Extract PPPoE Username & Password from TR-069 device
+ */
+export function extractPppoeCredentials(raw: any, config?: GenieACSConfig): { username?: string; password?: string } {
+  let username: string | undefined;
+  let password: string | undefined;
+
+  // 1. Check custom configured path if any
+  if (config?.parameterMapping?.pppoeUsername) {
+    username = extractTr069Value(raw, config.parameterMapping.pppoeUsername);
+  }
+  if (config?.parameterMapping?.pppoePassword) {
+    password = extractTr069Value(raw, config.parameterMapping.pppoePassword);
+  }
+
+  // 2. Standard TR-069 paths
+  const commonUserPaths = [
+    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username',
+    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Username',
+    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.2.Username',
+    'InternetGatewayDevice.WANDevice.2.WANConnectionDevice.1.WANPPPConnection.1.Username',
+    'Device.PPP.Interface.1.Username',
+    'Device.PPP.Interface.2.Username'
+  ];
+
+  const commonPassPaths = [
+    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Password',
+    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.2.WANPPPConnection.1.Password',
+    'InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.2.Password',
+    'InternetGatewayDevice.WANDevice.2.WANConnectionDevice.1.WANPPPConnection.1.Password',
+    'Device.PPP.Interface.1.Password',
+    'Device.PPP.Interface.2.Password'
+  ];
+
+  if (!username) {
+    for (const p of commonUserPaths) {
+      const val = extractTr069Value(raw, p);
+      if (val && typeof val === 'string' && val.trim()) {
+        username = val.trim();
+        break;
+      }
+    }
+  }
+
+  if (!password) {
+    for (const p of commonPassPaths) {
+      const val = extractTr069Value(raw, p);
+      if (val && typeof val === 'string' && val.trim()) {
+        password = val.trim();
+        break;
+      }
+    }
+  }
+
+  // 3. Recursive keys scan for dynamic WAN indexes (e.g. Huawei/ZTE dynamic multi-WAN)
+  if (!username || !password) {
+    const scanKeys = (obj: any, prefix = ''): void => {
+      if (!obj || typeof obj !== 'object') return;
+      for (const k of Object.keys(obj)) {
+        const fullKey = prefix ? `${prefix}.${k}` : k;
+        if (!username && (fullKey.includes('PPP') || fullKey.includes('ppp')) && fullKey.endsWith('.Username')) {
+          const res = extractTr069Value(obj, k);
+          if (res && typeof res === 'string' && res.trim()) username = res.trim();
+        }
+        if (!password && (fullKey.includes('PPP') || fullKey.includes('ppp')) && fullKey.endsWith('.Password')) {
+          const res = extractTr069Value(obj, k);
+          if (res && typeof res === 'string' && res.trim()) password = res.trim();
+        }
+        if (typeof obj[k] === 'object' && obj[k] !== null && !('_value' in obj[k])) {
+          scanKeys(obj[k], fullKey);
+        }
+      }
+    };
+    try {
+      scanKeys(raw);
+    } catch {
+      // Ignore scanning error
+    }
+  }
+
+  return { username, password };
 }
 
 /**
@@ -411,6 +504,11 @@ export function parseRawGenieAcsJson(rawDevices: any[], config: GenieACSConfig):
       }
     }
 
+    // PPPoE Credentials Extraction (Username & Password)
+    const pppoe = extractPppoeCredentials(raw, config);
+    const pppoeUsername = pppoe.username;
+    const pppoePassword = pppoe.password;
+
     return {
       _id: cleanId,
       serialNumber,
@@ -422,6 +520,8 @@ export function parseRawGenieAcsJson(rawDevices: any[], config: GenieACSConfig):
       txOpticalPower,
       lastInform,
       status: isOnline ? 'online' : 'offline',
+      pppoeUsername,
+      pppoePassword,
       uptimeHours: 24,
       lanPortsActive: 1,
       wifiClients: 2
@@ -545,6 +645,9 @@ export function syncDevicesWithCustomers(
       c => String(c.ontSerialNumber || '').trim().toUpperCase() === cleanSn.toUpperCase()
     );
 
+    const pppUser = device.pppoeUsername ? String(device.pppoeUsername).trim() : '';
+    const pppPass = device.pppoePassword ? String(device.pppoePassword).trim() : '';
+
     if (custIndex >= 0) {
       // Existing customer: update metrics from real GenieACS ONT
       matchedCount++;
@@ -555,8 +658,18 @@ export function syncDevicesWithCustomers(
         ? 'high_loss'
         : 'active';
 
+      // Upgrade generic names or packages if PPPoE data is newly discovered
+      const shouldUpgradeName = pppUser && (!current.name || current.name.startsWith('Pelanggan ONT'));
+      const shouldUpgradeAccNo = pppUser && (!current.accountNumber || current.accountNumber.startsWith('GNC-'));
+      const shouldUpgradePackage = pppPass && (!current.packagePlan || current.packagePlan === 'Home Fiber 50 Mbps');
+
       updatedCustomers[custIndex] = {
         ...current,
+        name: shouldUpgradeName ? pppUser : current.name,
+        accountNumber: shouldUpgradeAccNo ? pppUser : current.accountNumber,
+        packagePlan: shouldUpgradePackage ? pppPass : current.packagePlan,
+        pppoeUsername: pppUser || current.pppoeUsername,
+        pppoePassword: pppPass || current.pppoePassword,
         rxOpticalPower: rxPower,
         txOpticalPower: txPower,
         ipAddress: cleanIp,
@@ -575,20 +688,27 @@ export function syncDevicesWithCustomers(
         ? 'high_loss'
         : 'active';
 
+      // User requested: "kolom pelanggan & id diambil dari user pppoe untuk paket layanan diambil dari password pppoe"
+      const custName = pppUser ? pppUser : `Pelanggan ONT (${cleanSn})`;
+      const custAccountNumber = pppUser ? pppUser : `GNC-${cleanSn.slice(-6).toUpperCase()}`;
+      const custPackagePlan = pppPass ? pppPass : 'Home Fiber 50 Mbps';
+
       updatedCustomers.push({
         id: newId,
-        accountNumber: `GNC-${cleanSn.slice(-6).toUpperCase()}`,
-        name: `Pelanggan ONT (${cleanSn})`,
+        accountNumber: custAccountNumber,
+        name: custName,
         phone: '0812-XXXX-XXXX',
-        email: `${safeSnSlug}@customer.net`,
+        email: `${(pppUser || safeSnSlug).toLowerCase().replace(/[^a-z0-9]/g, '')}@customer.net`,
         address: `Alamat Pelanggan ONT ${cleanSn}`,
         area: 'Cluster Melati',
-        packagePlan: 'Home Fiber 50 Mbps',
+        packagePlan: custPackagePlan,
         monthlyFee: 250000,
         odpId: defaultOdpId,
         odpPort: (newImportedCount % 8) + 1,
         ontSerialNumber: cleanSn,
         ontModel: cleanModel,
+        pppoeUsername: pppUser || undefined,
+        pppoePassword: pppPass || undefined,
         rxOpticalPower: rxPower,
         txOpticalPower: txPower,
         ipAddress: cleanIp,

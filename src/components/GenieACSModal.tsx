@@ -96,7 +96,9 @@ export const GenieACSModal: React.FC<GenieACSModalProps> = ({
     const mfg = String(d.manufacturer || '').toLowerCase();
     const model = String(d.modelName || '').toLowerCase();
     const cust = String(d.matchedCustomerName || '').toLowerCase();
-    return sn.includes(q) || ip.includes(q) || mfg.includes(q) || model.includes(q) || cust.includes(q);
+    const pppUser = String(d.pppoeUsername || '').toLowerCase();
+    const pppPass = String(d.pppoePassword || '').toLowerCase();
+    return sn.includes(q) || ip.includes(q) || mfg.includes(q) || model.includes(q) || cust.includes(q) || pppUser.includes(q) || pppPass.includes(q);
   });
 
   const totalDevicePages = Math.ceil(filteredDevices.length / devicePageSize) || 1;
@@ -771,6 +773,38 @@ export const GenieACSModal: React.FC<GenieACSModalProps> = ({
                       className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono text-[11px]"
                     />
                   </div>
+
+                  <div>
+                    <label className="block text-cyan-300 font-semibold mb-1">
+                      Path PPPoE Username (Nama / ID)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Username"
+                      value={formData.parameterMapping.pppoeUsername || ''}
+                      onChange={e => setFormData(prev => ({
+                        ...prev,
+                        parameterMapping: { ...prev.parameterMapping, pppoeUsername: e.target.value }
+                      }))}
+                      className="w-full bg-slate-900 border border-cyan-800/60 rounded-lg px-3 py-2 text-white font-mono text-[11px]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-cyan-300 font-semibold mb-1">
+                      Path PPPoE Password (Paket Layanan)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="InternetGatewayDevice.WANDevice.1.WANConnectionDevice.1.WANPPPConnection.1.Password"
+                      value={formData.parameterMapping.pppoePassword || ''}
+                      onChange={e => setFormData(prev => ({
+                        ...prev,
+                        parameterMapping: { ...prev.parameterMapping, pppoePassword: e.target.value }
+                      }))}
+                      className="w-full bg-slate-900 border border-cyan-800/60 rounded-lg px-3 py-2 text-white font-mono text-[11px]"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -936,6 +970,13 @@ export const GenieACSModal: React.FC<GenieACSModalProps> = ({
                               <div>
                                 <span className="font-semibold text-slate-200 block text-xs">{String(device.matchedCustomerName)}</span>
                                 <span className="text-[10px] text-emerald-400 font-mono">Tersinkronisasi</span>
+                              </div>
+                            ) : device.pppoeUsername ? (
+                              <div>
+                                <span className="font-semibold text-cyan-300 block text-xs font-mono">{device.pppoeUsername}</span>
+                                {device.pppoePassword && (
+                                  <span className="text-[10px] text-amber-300 font-mono block">Paket: {device.pppoePassword}</span>
+                                )}
                               </div>
                             ) : (
                               <span className="text-slate-500 text-[10px] italic">Belum terasosiasi</span>

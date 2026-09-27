@@ -89,6 +89,23 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
     ontSerialNumber: `ZTEG${Math.random().toString(36).substring(2, 8).toUpperCase()}`
   });
 
+  // Edit Customer Modal State
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [editFormData, setEditFormData] = useState<Customer | null>(null);
+
+  const handleOpenEditModal = (cust: Customer) => {
+    setEditingCustomer(cust);
+    setEditFormData({ ...cust });
+  };
+
+  const handleSaveEditCustomer = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editFormData) return;
+    onUpdateCustomer(editFormData);
+    setEditingCustomer(null);
+    setEditFormData(null);
+  };
+
   // Pagination state for handling large datasets (500+ CPEs)
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -380,16 +397,33 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
                     <tr key={customer.id} className="hover:bg-slate-800/40 transition-colors">
                       {/* Customer Info */}
                       <td className="py-3.5 px-4">
-                        <div className="font-semibold text-slate-100 text-sm">{customer.name}</div>
-                        <div className="text-[11px] text-cyan-400 font-mono">{customer.accountNumber}</div>
+                        <div className="font-semibold text-slate-100 text-sm flex items-center space-x-1.5 flex-wrap gap-y-1">
+                          <span>{customer.name}</span>
+                          {customer.pppoeUsername && (
+                            <span className="bg-cyan-950 text-cyan-300 border border-cyan-800 text-[9px] px-1.5 py-0.5 rounded font-mono font-bold" title="Username PPPoE ONT">
+                              PPPoE: {customer.pppoeUsername}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-cyan-400 font-mono flex items-center space-x-2 mt-0.5">
+                          <span>ID: {customer.accountNumber}</span>
+                          {customer.phone && customer.phone !== '0812-XXXX-XXXX' && (
+                            <span className="text-slate-400 text-[10px]">({customer.phone})</span>
+                          )}
+                        </div>
                         <div className="text-[10px] text-slate-400 truncate max-w-[200px] mt-0.5">{customer.address}</div>
                       </td>
 
                       {/* Package Plan */}
                       <td className="py-3.5 px-4">
-                        <span className="bg-slate-950 px-2.5 py-1 rounded-md text-slate-200 font-medium border border-slate-800 inline-block">
+                        <span className="bg-slate-950 px-2.5 py-1 rounded-md text-cyan-200 font-medium border border-slate-800 inline-block text-xs">
                           {String(customer.packagePlan || 'Standard')}
                         </span>
+                        {customer.pppoePassword && (
+                          <div className="text-[9px] text-slate-400 font-mono mt-0.5" title="Diambil dari Password PPPoE ONT">
+                            Pass: <span className="text-amber-300 font-bold">{customer.pppoePassword}</span>
+                          </div>
+                        )}
                         <div className="text-[10px] text-slate-400 mt-1 font-mono">
                           Rp {(customer.monthlyFee || 0).toLocaleString('id-ID')}/bln
                         </div>
@@ -456,6 +490,14 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
                       {/* Integrated Action Buttons */}
                       <td className="py-3.5 px-4 text-right">
                         <div className="flex items-center justify-end space-x-1.5">
+                          <button
+                            onClick={() => handleOpenEditModal(customer)}
+                            className="bg-slate-800 hover:bg-amber-600/20 text-amber-300 border border-amber-500/40 p-1.5 rounded-lg transition-all cursor-pointer"
+                            title="Edit Data & Paket Layanan Pelanggan"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+
                           <button
                             onClick={() => onOpenDiagnostic(customer)}
                             className="bg-slate-800 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/30 px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1 transition-all cursor-pointer"
@@ -712,6 +754,238 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
                   className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold shadow-lg shadow-cyan-600/30 cursor-pointer"
                 >
                   Aktivasi Pelanggan
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Edit Pelanggan */}
+      {editingCustomer && editFormData && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl p-6 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2">
+                <Edit3 className="w-5 h-5 text-amber-400" />
+                <div>
+                  <h3 className="font-bold text-base text-white">Edit Data & Layanan Pelanggan</h3>
+                  <div className="text-[11px] text-slate-400 font-mono">
+                    ID: {editFormData.accountNumber} • SN: {editFormData.ontSerialNumber}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setEditingCustomer(null);
+                  setEditFormData(null);
+                }}
+                className="text-slate-400 hover:text-white p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditCustomer} className="space-y-3.5 text-xs">
+              {/* Row 1: Nama & ID Pelanggan */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Nama Pelanggan <span className="text-rose-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editFormData.name}
+                    onChange={e => setEditFormData(prev => prev ? ({ ...prev, name: e.target.value }) : null)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    ID Pelanggan / No. Akun <span className="text-rose-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editFormData.accountNumber}
+                    onChange={e => setEditFormData(prev => prev ? ({ ...prev, accountNumber: e.target.value }) : null)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+              </div>
+
+              {/* Row 2: PPPoE Credentials */}
+              <div className="bg-slate-950 p-3 rounded-xl border border-cyan-900/50 space-y-2">
+                <span className="font-semibold text-cyan-300 text-[11px] flex items-center space-x-1.5">
+                  <Terminal className="w-3.5 h-3.5" />
+                  <span>Kredensial PPPoE Dial ONT (Sinkronisasi GenieACS)</span>
+                </span>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-400 text-[10px] mb-1">Username PPPoE</label>
+                    <input
+                      type="text"
+                      placeholder="Username dial pppoe..."
+                      value={editFormData.pppoeUsername || ''}
+                      onChange={e => setEditFormData(prev => prev ? ({ ...prev, pppoeUsername: e.target.value }) : null)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono focus:outline-none focus:border-cyan-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 text-[10px] mb-1">Password PPPoE</label>
+                    <input
+                      type="text"
+                      placeholder="Password pppoe / paket..."
+                      value={editFormData.pppoePassword || ''}
+                      onChange={e => setEditFormData(prev => prev ? ({ ...prev, pppoePassword: e.target.value }) : null)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono focus:outline-none focus:border-cyan-400"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Row 3: Paket Layanan & Biaya Bulanan */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Paket Layanan Internet</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Contoh: Home Fiber 50 Mbps"
+                    value={editFormData.packagePlan}
+                    onChange={e => setEditFormData(prev => prev ? ({ ...prev, packagePlan: e.target.value }) : null)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Tagihan Bulanan (Rp)</label>
+                  <input
+                    type="number"
+                    step={5000}
+                    value={editFormData.monthlyFee}
+                    onChange={e => setEditFormData(prev => prev ? ({ ...prev, monthlyFee: Number(e.target.value) }) : null)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+              </div>
+
+              {/* Row 4: Kontak & Alamat */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">No. WhatsApp / HP</label>
+                  <input
+                    type="text"
+                    value={editFormData.phone}
+                    onChange={e => setEditFormData(prev => prev ? ({ ...prev, phone: e.target.value }) : null)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Wilayah / Cluster</label>
+                  <select
+                    value={editFormData.area}
+                    onChange={e => setEditFormData(prev => prev ? ({ ...prev, area: e.target.value }) : null)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-amber-400"
+                  >
+                    <option value="Cluster Melati">Cluster Melati</option>
+                    <option value="Kawasan Niaga">Kawasan Niaga</option>
+                    <option value="Graha Asri">Graha Asri</option>
+                    <option value="Cluster Anggrek">Cluster Anggrek</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Alamat Lengkap</label>
+                <input
+                  type="text"
+                  value={editFormData.address}
+                  onChange={e => setEditFormData(prev => prev ? ({ ...prev, address: e.target.value }) : null)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              {/* Row 5: ODP & Hardware ONT */}
+              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-3">
+                <span className="font-semibold text-slate-300 block text-xs">
+                  Konfigurasi Jaringan & Perangkat Keras
+                </span>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-400 text-[11px] mb-1">Terhubung ke ODP</label>
+                    <select
+                      value={editFormData.odpId}
+                      onChange={e => setEditFormData(prev => prev ? ({ ...prev, odpId: e.target.value }) : null)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono focus:outline-none focus:border-amber-400"
+                    >
+                      {odpNodes.map(odp => (
+                        <option key={odp.id} value={odp.id}>
+                          {odp.code} ({odp.name})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 text-[11px] mb-1">Port Splitter ODP</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={16}
+                      value={editFormData.odpPort}
+                      onChange={e => setEditFormData(prev => prev ? ({ ...prev, odpPort: Number(e.target.value) }) : null)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-400 text-[11px] mb-1">Serial Number ONT</label>
+                    <input
+                      type="text"
+                      value={editFormData.ontSerialNumber}
+                      onChange={e => setEditFormData(prev => prev ? ({ ...prev, ontSerialNumber: e.target.value.toUpperCase() }) : null)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono uppercase focus:outline-none focus:border-amber-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 text-[11px] mb-1">Status Pelanggan</label>
+                    <select
+                      value={editFormData.status}
+                      onChange={e => setEditFormData(prev => prev ? ({ ...prev, status: e.target.value as CustomerStatus }) : null)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white focus:outline-none focus:border-amber-400"
+                    >
+                      <option value="active">Online Aktif</option>
+                      <option value="high_loss">High Loss (Redaman Tinggi)</option>
+                      <option value="los_down">LOS (Putus / Redaman Hilang)</option>
+                      <option value="suspended">Suspended (Isolir Tagihan)</option>
+                      <option value="isolated">Terisolasi</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Submit Buttons */}
+              <div className="pt-3 border-t border-slate-800 flex justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingCustomer(null);
+                    setEditFormData(null);
+                  }}
+                  className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-300 font-medium cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold shadow-lg shadow-amber-600/30 cursor-pointer flex items-center space-x-1.5"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Simpan Perubahan</span>
                 </button>
               </div>
             </form>

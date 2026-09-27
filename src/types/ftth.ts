@@ -73,6 +73,8 @@ export interface Customer {
   joinDate: string;
   ontModel?: string;
   lastOnlineTime?: string;
+  pppoeUsername?: string;
+  pppoePassword?: string;
   coordinates: {
     x: number;
     y: number;
@@ -169,6 +171,8 @@ export interface GenieACSConfig {
     ipAddress: string;
     modelName: string;
     softwareVersion: string;
+    pppoeUsername?: string;
+    pppoePassword?: string;
   };
 }
 
@@ -183,6 +187,8 @@ export interface GenieACSDevice {
   txOpticalPower: number;
   lastInform: string;
   status: 'online' | 'offline' | 'warning';
+  pppoeUsername?: string;
+  pppoePassword?: string;
   matchedCustomerId?: string;
   matchedCustomerName?: string;
 }
