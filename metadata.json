@@ -1,0 +1,6 @@
+{
+  "name": "GENIACS - FTTH Network Operations & Customer Management",
+  "description": "Platform terpadu pemetaan FTTH real-time, manajemen pelanggan, notifikasi otomatis gangguan jaringan, pemeliharaan teknisi, dan analitik performa jaringan fiber optik dengan role access control.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
