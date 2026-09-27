@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Navbar } from './components/Navbar';
 import { Sidebar, ActiveTab } from './components/Sidebar';
 import { DashboardOverview } from './components/DashboardOverview';
@@ -38,24 +38,61 @@ import {
   GenieACSDevice
 } from './types/ftth';
 
+import { storage } from './services/storage';
+import { 
+  fetchRealGenieAcsDevices, 
+  rebootRealGenieAcsDevice, 
+  syncDevicesWithCustomers 
+} from './services/genieAcs';
+
 export default function App() {
   // Navigation & Role State
   const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
   const [currentUser, setCurrentUser] = useState<UserProfile>(INITIAL_USERS[0]); // Default: Admin
 
-  // Core Data State
-  const [nodes, setNodes] = useState<FTTHNode[]>(INITIAL_NODES);
-  const [cables, setCables] = useState<FTTHCable[]>(INITIAL_CABLES);
-  const [customers, setCustomers] = useState<Customer[]>(INITIAL_CUSTOMERS);
-  const [outages, setOutages] = useState<OutageAlert[]>(INITIAL_OUTAGES);
-  const [workOrders, setWorkOrders] = useState<WorkOrder[]>(INITIAL_WORK_ORDERS);
+  // Core Data State with persistence
+  const [nodes, setNodes] = useState<FTTHNode[]>(() => storage.getNodes(INITIAL_NODES));
+  const [cables, setCables] = useState<FTTHCable[]>(() => storage.getCables(INITIAL_CABLES));
+  const [customers, setCustomers] = useState<Customer[]>(() => storage.getCustomers(INITIAL_CUSTOMERS));
+  const [outages, setOutages] = useState<OutageAlert[]>(() => storage.getOutages(INITIAL_OUTAGES));
+  const [workOrders, setWorkOrders] = useState<WorkOrder[]>(() => storage.getWorkOrders(INITIAL_WORK_ORDERS));
   const [notificationLogs, setNotificationLogs] = useState<NotificationLog[]>(INITIAL_NOTIFICATION_LOGS);
   const [areaAnalytics, setAreaAnalytics] = useState<AreaData[]>(INITIAL_AREA_ANALYTICS);
 
-  // GenieACS TR-069 Integration State
-  const [genieAcsConfig, setGenieAcsConfig] = useState<GenieACSConfig>(INITIAL_GENIEACS_CONFIG);
-  const [genieAcsDevices, setGenieAcsDevices] = useState<GenieACSDevice[]>(INITIAL_GENIEACS_DEVICES);
+  // GenieACS TR-069 Integration State with persistence
+  const [genieAcsConfig, setGenieAcsConfig] = useState<GenieACSConfig>(() => storage.getConfig(INITIAL_GENIEACS_CONFIG));
+  const [genieAcsDevices, setGenieAcsDevices] = useState<GenieACSDevice[]>(() => storage.getDevices(INITIAL_GENIEACS_DEVICES));
+  const [isLiveData, setIsLiveData] = useState<boolean>(() => storage.isLiveData());
   const [isGenieAcsModalOpen, setIsGenieAcsModalOpen] = useState(false);
+
+  // Auto-persist changes to localStorage
+  useEffect(() => {
+    storage.saveCustomers(customers);
+  }, [customers]);
+
+  useEffect(() => {
+    storage.saveNodes(nodes);
+  }, [nodes]);
+
+  useEffect(() => {
+    storage.saveCables(cables);
+  }, [cables]);
+
+  useEffect(() => {
+    storage.saveOutages(outages);
+  }, [outages]);
+
+  useEffect(() => {
+    storage.saveWorkOrders(workOrders);
+  }, [workOrders]);
+
+  useEffect(() => {
+    storage.saveConfig(genieAcsConfig);
+  }, [genieAcsConfig]);
+
+  useEffect(() => {
+    storage.saveDevices(genieAcsDevices);
+  }, [genieAcsDevices]);
 
   // Google Drive Cloud Storage & Backup State
   const [isGoogleDriveModalOpen, setIsGoogleDriveModalOpen] = useState(false);
@@ -398,54 +435,82 @@ export default function App() {
     showToast(`Pesan WhatsApp terkirim ke ${customer.name} (${customer.phone}).`);
   };
 
-  // Sync ONTs from GenieACS TR-069
-  const handleSyncGenieAcsDevices = async () => {
-    // Simulate query to NBI API: GET /devices/?query={...}
-    await new Promise(r => setTimeout(r, 1200));
+  // Real Sync ONTs from GenieACS TR-069 NBI
+  const handleSyncGenieAcsDevices = async (customConfig?: GenieACSConfig, autoImport: boolean = true) => {
+    const activeConfig = customConfig || genieAcsConfig;
+    showToast(`Menghubungkan ke GenieACS (${activeConfig.serverUrl})...`);
 
-    // Match CPE devices to customers by Serial Number and update customer optical Rx power & status
-    let matchCount = 0;
-    setCustomers(prev => prev.map(cust => {
-      const matchedDevice = genieAcsDevices.find(d => d.serialNumber === cust.ontSerialNumber);
-      if (matchedDevice) {
-        matchCount++;
-        const newStatus = matchedDevice.rxOpticalPower < -28 
-          ? 'los_down' 
-          : matchedDevice.rxOpticalPower < -24 
-          ? 'high_loss' 
-          : 'active';
+    try {
+      // 1. Real call to GenieACS NBI API!
+      const realDevices = await fetchRealGenieAcsDevices(activeConfig);
 
-        return {
-          ...cust,
-          rxOpticalPower: matchedDevice.rxOpticalPower,
-          txOpticalPower: matchedDevice.txOpticalPower,
-          ipAddress: matchedDevice.ipAddress,
-          status: newStatus
-        };
+      if (realDevices.length === 0) {
+        showToast('Tersambung ke GenieACS NBI, namun belum ada perangkat ONT yang terdaftar.');
       }
-      return cust;
-    }));
 
-    setGenieAcsConfig(prev => ({
-      ...prev,
-      isConnected: true,
-      lastSyncTime: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB'
-    }));
+      setGenieAcsDevices(realDevices);
+      storage.saveDevices(realDevices);
 
-    showToast(`⚡ Sinkronisasi GenieACS Selesai: ${matchCount} ONT pelanggan berhasil diperbarui via TR-069!`);
+      // 2. Match with existing customers or auto-import real devices
+      const { updatedCustomers, matchedCount, newImportedCount } = syncDevicesWithCustomers(
+        realDevices,
+        customers
+      );
+
+      setCustomers(updatedCustomers);
+      storage.saveCustomers(updatedCustomers);
+
+      const onlineCount = realDevices.filter(d => d.status === 'online').length;
+      const updatedConfig: GenieACSConfig = {
+        ...activeConfig,
+        isConnected: true,
+        totalDevicesFound: realDevices.length,
+        onlineDevices: onlineCount,
+        lastSyncTime: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB'
+      };
+
+      setGenieAcsConfig(updatedConfig);
+      storage.saveConfig(updatedConfig);
+      storage.setLiveData(true);
+      setIsLiveData(true);
+
+      showToast(`⚡ Sinkronisasi Sukses: ${realDevices.length} ONT terdeteksi (${matchedCount} diperbarui, ${newImportedCount} diimpor ke pelanggan)!`);
+    } catch (err: any) {
+      console.warn('Real fetch to GenieACS error:', err);
+      showToast(`⚠️ Gagal sync GenieACS (${activeConfig.serverUrl}): ${err.message}`);
+      throw err;
+    }
   };
 
-  // Remote Reboot via TR-069 Task
+  // Real Remote Reboot via TR-069 Task
   const handleRebootGenieAcsDevice = async (deviceId: string) => {
-    // Simulate POST /devices/<id>/tasks?name=reboot
-    await new Promise(r => setTimeout(r, 1500));
-    setGenieAcsDevices(prev => prev.map(d => {
-      if (d._id === deviceId) {
-        return { ...d, lastInform: 'Baru saja (Rebooted)' };
-      }
-      return d;
-    }));
-    showToast(`Perintah TR-069 Reboot berhasil dikirimkan ke perangkat ${deviceId}!`);
+    try {
+      await rebootRealGenieAcsDevice(genieAcsConfig, deviceId);
+      setGenieAcsDevices(prev => {
+        const next = prev.map(d => {
+          if (d._id === deviceId) {
+            return { ...d, lastInform: 'Baru saja (Reboot Queued)' };
+          }
+          return d;
+        });
+        storage.saveDevices(next);
+        return next;
+      });
+      showToast(`Perintah TR-069 Reboot berhasil dikirimkan ke GenieACS untuk perangkat ${deviceId}!`);
+    } catch (err: any) {
+      showToast(`Gagal reboot perangkat: ${err.message}`);
+    }
+  };
+
+  // Clear demo customers so user only sees real data from their server
+  const handleClearDemoData = () => {
+    if (confirm('Kosongkan data pelanggan contoh/demo? Data pelanggan akan digantikan sepenuhnya oleh ONT real dari server GenieACS Anda.')) {
+      setCustomers([]);
+      storage.saveCustomers([]);
+      storage.setLiveData(true);
+      setIsLiveData(true);
+      showToast('Data pelanggan demo dibersihkan. Silakan tekan "Sinkronkan & Impor ke Pelanggan" untuk memuat ONT asli Anda.');
+    }
   };
 
   const activeOutagesCount = outages.filter(o => o.status !== 'resolved').length;
@@ -465,6 +530,7 @@ export default function App() {
         genieAcsConfig={genieAcsConfig}
         onOpenGenieAcsModal={() => setIsGenieAcsModalOpen(true)}
         onOpenGoogleDrive={() => setIsGoogleDriveModalOpen(true)}
+        isLiveData={isLiveData}
       />
 
       {/* Main Body with Sidebar + Content */}
@@ -600,12 +666,15 @@ export default function App() {
         config={genieAcsConfig}
         onSaveConfig={(newConfig) => {
           setGenieAcsConfig(newConfig);
+          storage.saveConfig(newConfig);
           showToast(`Konfigurasi GenieACS tersimpan: ${newConfig.serverUrl}`);
         }}
         devices={genieAcsDevices}
         onSyncDevices={handleSyncGenieAcsDevices}
         customers={customers}
         onRebootDevice={handleRebootGenieAcsDevice}
+        onClearDemoData={handleClearDemoData}
+        isLiveData={isLiveData}
       />
 
       {/* Google Drive Workspace Cloud Modal */}

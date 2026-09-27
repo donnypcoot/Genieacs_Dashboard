@@ -338,8 +338,27 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
             <tbody className="divide-y divide-slate-800/60">
               {filteredCustomers.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-10 text-slate-400">
-                    Tidak ada data pelanggan yang sesuai dengan pencarian.
+                  <td colSpan={7} className="text-center py-12 text-slate-400">
+                    <div className="space-y-3 max-w-md mx-auto">
+                      <Users className="w-10 h-10 text-slate-600 mx-auto" />
+                      <div className="text-sm font-bold text-slate-300">
+                        {customers.length === 0 ? 'Belum Ada Data Pelanggan' : 'Tidak ada data pelanggan yang sesuai dengan pencarian.'}
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        {customers.length === 0 
+                          ? 'Hubungkan ke server GenieACS Anda pada port 7557 untuk mengimpor seluruh ONT real ke sistem.'
+                          : 'Coba ubah kata kunci pencarian atau reset filter area dan status.'}
+                      </p>
+                      {customers.length === 0 && onOpenGenieAcs && (
+                        <button
+                          onClick={onOpenGenieAcs}
+                          className="inline-flex items-center space-x-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-xl shadow-md shadow-cyan-600/30 cursor-pointer"
+                        >
+                          <Server className="w-4 h-4" />
+                          <span>Sinkronkan ONT dari GenieACS Sekarang</span>
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ) : (

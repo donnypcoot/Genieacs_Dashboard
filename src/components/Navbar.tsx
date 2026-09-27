@@ -25,6 +25,7 @@ interface NavbarProps {
   genieAcsConfig: GenieACSConfig;
   onOpenGenieAcsModal: () => void;
   onOpenGoogleDrive?: () => void;
+  isLiveData?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -37,7 +38,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   isSimulatedCut,
   genieAcsConfig,
   onOpenGenieAcsModal,
-  onOpenGoogleDrive
+  onOpenGoogleDrive,
+  isLiveData
 }) => {
   return (
     <header className="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-40 select-none">
@@ -95,6 +97,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <div className="flex items-center space-x-1.5">
                   <span className="font-bold font-mono">GenieACS</span>
                   <span className={`w-1.5 h-1.5 rounded-full ${genieAcsConfig.isConnected ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                  <span className={`text-[9px] px-1 rounded font-bold ${
+                    isLiveData ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
+                  }`}>
+                    {isLiveData ? 'LIVE' : 'DEMO'}
+                  </span>
                 </div>
                 <div className="text-[10px] text-slate-400 font-mono leading-none truncate max-w-[110px]">
                   {genieAcsConfig.serverUrl.replace('http://', '').replace('https://', '')}

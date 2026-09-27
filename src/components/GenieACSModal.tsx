@@ -17,9 +17,12 @@ import {
   Radio, 
   ArrowRight,
   Database,
-  Link2
+  Link2,
+  Download,
+  Trash2
 } from 'lucide-react';
 import { GenieACSConfig, GenieACSDevice, Customer } from '../types/ftth';
+import { testGenieAcsConnection } from '../services/genieAcs';
 
 interface GenieACSModalProps {
   isOpen: boolean;
@@ -27,9 +30,11 @@ interface GenieACSModalProps {
   config: GenieACSConfig;
   onSaveConfig: (newConfig: GenieACSConfig) => void;
   devices: GenieACSDevice[];
-  onSyncDevices: () => Promise<void>;
+  onSyncDevices: (customConfig?: GenieACSConfig, autoImport?: boolean) => Promise<void>;
   customers: Customer[];
   onRebootDevice: (deviceId: string) => Promise<void>;
+  onClearDemoData?: () => void;
+  isLiveData?: boolean;
 }
 
 export const GenieACSModal: React.FC<GenieACSModalProps> = ({
@@ -40,7 +45,9 @@ export const GenieACSModal: React.FC<GenieACSModalProps> = ({
   devices,
   onSyncDevices,
   customers,
-  onRebootDevice
+  onRebootDevice,
+  onClearDemoData,
+  isLiveData
 }) => {
   if (!isOpen) return null;
 
@@ -110,29 +117,29 @@ export const GenieACSModal: React.FC<GenieACSModalProps> = ({
     setIsTesting(true);
     setTestResult(null);
 
-    // Simulate / execute verification against NBI API
-    setTimeout(() => {
+    try {
+      const res = await testGenieAcsConnection(formData);
       setIsTesting(false);
-      if (!formData.serverUrl || !formData.serverUrl.startsWith('http')) {
-        setTestResult({
-          success: false,
-          message: 'Format URL tidak valid! Harap gunakan format seperti http://192.168.1.50:7557 atau https://acs.domain.com:7557'
-        });
-        return;
-      }
-
       setTestResult({
-        success: true,
-        message: `Koneksi Berhasil! NBI Server GenieACS merespon dalam 42ms. 12 ONT/CPE terdeteksi siap disinkronkan.`
+        success: res.success,
+        message: res.message
       });
 
-      setFormData(prev => ({
-        ...prev,
-        isConnected: true,
-        totalDevicesFound: 12,
-        onlineDevices: 11
-      }));
-    }, 1100);
+      if (res.success) {
+        setFormData(prev => ({
+          ...prev,
+          isConnected: true,
+          totalDevicesFound: res.totalDevices,
+          onlineDevices: res.totalDevices
+        }));
+      }
+    } catch (err: any) {
+      setIsTesting(false);
+      setTestResult({
+        success: false,
+        message: `Gagal menguji koneksi: ${err.message}`
+      });
+    }
   };
 
   const handleSave = (e: React.FormEvent) => {
@@ -145,10 +152,15 @@ export const GenieACSModal: React.FC<GenieACSModalProps> = ({
     onClose();
   };
 
-  const handleManualSync = async () => {
+  const handleManualSync = async (autoImport: boolean = true) => {
     setIsSyncing(true);
-    await onSyncDevices();
-    setIsSyncing(false);
+    try {
+      await onSyncDevices(formData, autoImport);
+    } catch {
+      // toast will notify
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   const handleTriggerReboot = async (deviceId: string) => {
@@ -274,7 +286,7 @@ export const GenieACSModal: React.FC<GenieACSModalProps> = ({
 
                   <button
                     type="button"
-                    onClick={handleManualSync}
+                    onClick={() => handleManualSync(true)}
                     disabled={isSyncing}
                     className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold px-3.5 py-2 rounded-xl text-xs flex items-center space-x-1.5 shadow-md shadow-cyan-600/30 cursor-pointer"
                   >
@@ -311,14 +323,44 @@ export const GenieACSModal: React.FC<GenieACSModalProps> = ({
                       <input
                         type="text"
                         required
-                        placeholder="http://192.168.1.50:7557 atau http://localhost:7557"
+                        placeholder="http://192.168.1.50:7557 atau /genieacs"
                         value={formData.serverUrl}
                         onChange={e => setFormData(prev => ({ ...prev, serverUrl: e.target.value }))}
                         className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono focus:outline-none focus:border-cyan-400"
                       />
                     </div>
-                    <span className="text-[10px] text-slate-400 mt-1 block">
-                      Default port GenieACS NBI adalah <strong>7557</strong>. Digunakan untuk query devices, parameters, dan tasks.
+
+                    {/* Quick Presets */}
+                    <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                      <span className="text-[10px] text-slate-500 font-medium">Pilihan Cepat:</span>
+                      <button
+                        type="button"
+                        onClick={() => setFormData(prev => ({ ...prev, serverUrl: '/genieacs' }))}
+                        className="text-[10px] bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 px-2 py-0.5 rounded border border-cyan-700 font-mono cursor-pointer"
+                        title="Gunakan jalur Nginx proxy /genieacs (Bebas kendala CORS)"
+                      >
+                        ⚡ /genieacs (Nginx Proxy)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFormData(prev => ({ ...prev, serverUrl: 'http://127.0.0.1:7557' }))}
+                        className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-0.5 rounded border border-slate-700 font-mono cursor-pointer"
+                      >
+                        127.0.0.1:7557
+                      </button>
+                      {typeof window !== 'undefined' && window.location.hostname && (
+                        <button
+                          type="button"
+                          onClick={() => setFormData(prev => ({ ...prev, serverUrl: `http://${window.location.hostname}:7557` }))}
+                          className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-0.5 rounded border border-slate-700 font-mono cursor-pointer"
+                        >
+                          IP Server Saat Ini:7557
+                        </button>
+                      )}
+                    </div>
+
+                    <span className="text-[10px] text-slate-400 mt-1.5 block">
+                      Default port GenieACS NBI adalah <strong>7557</strong>. Jika aplikasi dibuka lewat domain/HTTPS, disarankan menggunakan proxy Nginx <code>/genieacs</code> agar tidak terblokir CORS.
                     </span>
                   </div>
 
@@ -541,24 +583,47 @@ export const GenieACSModal: React.FC<GenieACSModalProps> = ({
           {/* TAB 2: DEVICE LIST */}
           {activeTab === 'devices' && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-sm font-bold text-white">
-                    Perangkat ONT Terdaftar di GenieACS TR-069
-                  </h3>
+                  <div className="flex items-center space-x-2">
+                    <h3 className="text-sm font-bold text-white">
+                      Perangkat ONT Terdaftar di GenieACS TR-069
+                    </h3>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold ${
+                      isLiveData 
+                        ? 'bg-emerald-950 text-emerald-300 border border-emerald-700' 
+                        : 'bg-amber-950 text-amber-300 border border-amber-700'
+                    }`}>
+                      {isLiveData ? '● Live Data Server' : '○ Data Simulasi Demo'}
+                    </span>
+                  </div>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Data diambil secara real-time dari NBI API port 7557 dan dicocokkan otomatis dengan nomor akun pelanggan.
+                    Data diambil secara real-time dari NBI API port 7557 dan dicocokkan otomatis dengan data pelanggan FTTH.
                   </p>
                 </div>
 
-                <button
-                  onClick={handleManualSync}
-                  disabled={isSyncing}
-                  className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold px-3.5 py-1.5 rounded-xl text-xs flex items-center space-x-1.5 cursor-pointer shadow-sm"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-                  <span>{isSyncing ? 'Menyinkronkan...' : 'Refresh dari GenieACS'}</span>
-                </button>
+                <div className="flex items-center space-x-2">
+                  {onClearDemoData && (
+                    <button
+                      type="button"
+                      onClick={onClearDemoData}
+                      className="bg-slate-800 hover:bg-rose-950 text-slate-300 hover:text-rose-300 border border-slate-700 px-3 py-1.5 rounded-xl text-xs flex items-center space-x-1.5 cursor-pointer transition-colors"
+                      title="Bersihkan data dummy demo agar hanya menyisakan data real dari server Anda"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                      <span>Reset Demo</span>
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => handleManualSync(true)}
+                    disabled={isSyncing}
+                    className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold px-3.5 py-1.5 rounded-xl text-xs flex items-center space-x-1.5 cursor-pointer shadow-md shadow-cyan-600/30"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                    <span>{isSyncing ? 'Menyinkronkan...' : 'Sinkronkan & Impor ke Pelanggan'}</span>
+                  </button>
+                </div>
               </div>
 
               <div className="bg-slate-950 rounded-2xl border border-slate-800 overflow-hidden">

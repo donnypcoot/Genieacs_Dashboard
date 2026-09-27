@@ -71,6 +71,8 @@ export interface Customer {
   txOpticalPower: number;
   dropCableLengthMeters: number;
   joinDate: string;
+  ontModel?: string;
+  lastOnlineTime?: string;
   coordinates: {
     x: number;
     y: number;
