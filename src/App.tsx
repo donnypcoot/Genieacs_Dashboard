@@ -42,7 +42,8 @@ import { storage } from './services/storage';
 import { 
   fetchRealGenieAcsDevices, 
   rebootRealGenieAcsDevice, 
-  syncDevicesWithCustomers 
+  syncDevicesWithCustomers,
+  parseRawGenieAcsJson
 } from './services/genieAcs';
 
 export default function App() {
@@ -502,6 +503,46 @@ export default function App() {
     }
   };
 
+  // Manual import JSON output (e.g. from curl or file)
+  const handleImportGenieAcsJson = (jsonString: string) => {
+    try {
+      const parsed = JSON.parse(jsonString.trim());
+      const devicesArray = Array.isArray(parsed) ? parsed : [parsed];
+      if (devicesArray.length === 0) {
+        showToast('JSON valid tetapi tidak ada objek perangkat yang ditemukan.');
+        return;
+      }
+      const realDevices = parseRawGenieAcsJson(devicesArray, genieAcsConfig);
+      setGenieAcsDevices(realDevices);
+      storage.saveDevices(realDevices);
+
+      const { updatedCustomers, matchedCount, newImportedCount } = syncDevicesWithCustomers(
+        realDevices,
+        customers
+      );
+      setCustomers(updatedCustomers);
+      storage.saveCustomers(updatedCustomers);
+      
+      const onlineCount = realDevices.filter(d => d.status === 'online').length;
+      const updatedConfig: GenieACSConfig = {
+        ...genieAcsConfig,
+        isConnected: true,
+        totalDevicesFound: realDevices.length,
+        onlineDevices: onlineCount,
+        lastSyncTime: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB'
+      };
+      setGenieAcsConfig(updatedConfig);
+      storage.saveConfig(updatedConfig);
+      storage.setLiveData(true);
+      setIsLiveData(true);
+
+      showToast(`⚡ Sukses Impor Manual: ${realDevices.length} ONT (${matchedCount} diperbarui, ${newImportedCount} diimpor ke pelanggan)!`);
+    } catch (err: any) {
+      showToast(`Format JSON tidak valid: ${err.message}`);
+      throw err;
+    }
+  };
+
   // Clear demo customers so user only sees real data from their server
   const handleClearDemoData = () => {
     if (confirm('Kosongkan data pelanggan contoh/demo? Data pelanggan akan digantikan sepenuhnya oleh ONT real dari server GenieACS Anda.')) {
@@ -675,6 +716,7 @@ export default function App() {
         onRebootDevice={handleRebootGenieAcsDevice}
         onClearDemoData={handleClearDemoData}
         isLiveData={isLiveData}
+        onImportJson={handleImportGenieAcsJson}
       />
 
       {/* Google Drive Workspace Cloud Modal */}

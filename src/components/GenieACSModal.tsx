@@ -39,6 +39,7 @@ interface GenieACSModalProps {
   onRebootDevice: (deviceId: string) => Promise<void>;
   onClearDemoData?: () => void;
   isLiveData?: boolean;
+  onImportJson?: (jsonString: string) => void;
 }
 
 export const GenieACSModal: React.FC<GenieACSModalProps> = ({
@@ -51,7 +52,8 @@ export const GenieACSModal: React.FC<GenieACSModalProps> = ({
   customers,
   onRebootDevice,
   onClearDemoData,
-  isLiveData
+  isLiveData,
+  onImportJson
 }) => {
   if (!isOpen) return null;
 
@@ -70,6 +72,11 @@ export const GenieACSModal: React.FC<GenieACSModalProps> = ({
   const [copiedSnippet, setCopiedSnippet] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [rebootingId, setRebootingId] = useState<string | null>(null);
+
+  // Manual JSON Paste State
+  const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
+  const [pastedJsonText, setPastedJsonText] = useState('');
+  const [pasteError, setPasteError] = useState<string | null>(null);
 
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -180,6 +187,23 @@ export const GenieACSModal: React.FC<GenieACSModalProps> = ({
       lastSyncTime: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB'
     });
     onClose();
+  };
+
+  const handleExecutePasteImport = () => {
+    if (!pastedJsonText.trim()) {
+      setPasteError('Silakan tempel teks output JSON dari terminal terlebih dahulu.');
+      return;
+    }
+    try {
+      if (onImportJson) {
+        onImportJson(pastedJsonText);
+        setIsPasteModalOpen(false);
+        setPastedJsonText('');
+        setPasteError(null);
+      }
+    } catch (err: any) {
+      setPasteError(err.message || 'Gagal memproses format JSON');
+    }
   };
 
   const handleManualSync = async (autoImport: boolean = true) => {
@@ -785,6 +809,18 @@ export const GenieACSModal: React.FC<GenieACSModalProps> = ({
                     </button>
                   )}
 
+                  {onImportJson && (
+                    <button
+                      type="button"
+                      onClick={() => setIsPasteModalOpen(true)}
+                      className="bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 px-3 py-1.5 rounded-xl text-xs flex items-center space-x-1.5 cursor-pointer transition-colors shadow-sm"
+                      title="Tempel output JSON dari 'curl http://127.0.0.1:7557/devices' untuk mengimpor ONT tanpa kendala timeout"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Tempel JSON Terminal</span>
+                    </button>
+                  )}
+
                   <button
                     onClick={() => handleManualSync(true)}
                     disabled={isSyncing}
@@ -895,7 +931,48 @@ GENIEACS_NBI_PORT=7557`}</pre>
 
                   <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 space-y-1">
                     <span className="text-slate-400 block font-sans text-xs font-semibold">3. Contoh pengujian curl dari mesin lokal / server:</span>
-                    <pre className="text-amber-300 overflow-x-auto">{`curl -i http://<IP_GENIEACS>:7557/devices/`}</pre>
+                    <pre className="text-amber-300 overflow-x-auto">{`curl -i http://127.0.0.1:7557/devices`}</pre>
+                  </div>
+                </div>
+              </div>
+
+              {/* Troubleshooting Timeout Box */}
+              <div className="bg-slate-950 p-5 rounded-2xl border border-amber-500/30 space-y-3">
+                <h3 className="font-bold text-amber-300 text-sm flex items-center space-x-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-400" />
+                  <span>Solusi Mengatasi Error "Timeout" Saat Sinkronisasi NBI</span>
+                </h3>
+                <p className="text-slate-300 leading-relaxed">
+                  Jika sinkronisasi ke <code>/genieacs/</code> mengalami timeout (&gt;10s), ada 3 penyebab paling sering di server Ubuntu:
+                </p>
+
+                <div className="space-y-3 pt-1 font-mono text-[11px]">
+                  <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 space-y-1">
+                    <span className="text-slate-300 block font-sans text-xs font-semibold">1. Gunakan IP 127.0.0.1 (Bukan localhost) di Nginx</span>
+                    <p className="text-[10px] text-slate-400 font-sans">
+                      Di Ubuntu, <code>localhost</code> mencoba IPv6 (<code>::1</code>) terlebih dahulu sehingga terjadi delay 5-10 detik jika GenieACS hanya aktif di IPv4.
+                    </p>
+                    <pre className="text-cyan-300 overflow-x-auto">{`# Pastikan proxy_pass menggunakan 127.0.0.1:
+location /genieacs/ {
+    proxy_pass http://127.0.0.1:7557/;
+    proxy_connect_timeout 15s;
+    proxy_read_timeout 60s;
+}`}</pre>
+                  </div>
+
+                  <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 space-y-1">
+                    <span className="text-slate-300 block font-sans text-xs font-semibold">2. Restart MongoDB & GenieACS NBI (Bebaskan Kunci Deadlock)</span>
+                    <p className="text-[10px] text-slate-400 font-sans">
+                      Jika MongoDB sempat terhenti, daemon GenieACS NBI bisa menggantung (hang) saat membaca koleksi devices.
+                    </p>
+                    <pre className="text-emerald-400 overflow-x-auto">sudo systemctl restart mongod && sudo systemctl restart genieacs-nbi</pre>
+                  </div>
+
+                  <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 space-y-1">
+                    <span className="text-slate-300 block font-sans text-xs font-semibold">3. Gunakan Fitur "Tempel JSON Terminal" (Pasti Berhasil)</span>
+                    <p className="text-[10px] text-slate-400 font-sans">
+                      Buka terminal VPS Anda, jalankan <code>curl -s http://127.0.0.1:7557/devices</code> lalu tempel hasilnya di tab <strong>Daftar Perangkat CPE</strong> &gt; tombol <strong>Tempel JSON Terminal</strong>.
+                    </p>
                   </div>
                 </div>
               </div>
@@ -903,6 +980,95 @@ GENIEACS_NBI_PORT=7557`}</pre>
           )}
         </div>
       </div>
+
+      {/* Manual JSON Paste Modal */}
+      {isPasteModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/90 z-60 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/80">
+              <div className="flex items-center space-x-2">
+                <Download className="w-4 h-4 text-cyan-400" />
+                <h4 className="font-bold text-sm text-white">Impor Data ONT dari Terminal Server (Bypass Jaringan)</h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPasteModalOpen(false);
+                  setPasteError(null);
+                }}
+                className="text-slate-400 hover:text-white p-1 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 overflow-y-auto">
+              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 text-xs text-slate-300 space-y-2">
+                <div className="font-semibold text-white">Langkah 1: Jalankan perintah ini di terminal server Ubuntu Anda:</div>
+                <div className="flex items-center justify-between bg-slate-900 px-3 py-2 rounded-lg font-mono text-[11px] text-emerald-400 border border-slate-800">
+                  <span>curl -s http://127.0.0.1:7557/devices</span>
+                  <button
+                    type="button"
+                    onClick={() => copyToClipboard('curl -s http://127.0.0.1:7557/devices', 'cmd-curl-devices')}
+                    className="text-cyan-400 hover:text-cyan-300 text-[10px] flex items-center space-x-1 cursor-pointer ml-2"
+                  >
+                    <Copy className="w-3 h-3" />
+                    <span>{copiedSnippet === 'cmd-curl-devices' ? 'Tersalin!' : 'Salin'}</span>
+                  </button>
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  Langkah 2: Salin seluruh output JSON yang muncul di terminal (mulai dari tanda <code>[</code> sampai <code>]</code>), lalu tempelkan pada kotak di bawah ini:
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Tempel Output JSON GenieACS NBI:
+                </label>
+                <textarea
+                  rows={8}
+                  placeholder={`[{"_id":"ZTEGC123...","DeviceID":{"SerialNumber":"ZTEGC123"},"_lastInform":"..."}, ...]` }
+                  value={pastedJsonText}
+                  onChange={e => {
+                    setPastedJsonText(e.target.value);
+                    setPasteError(null);
+                  }}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs text-cyan-200 font-mono focus:outline-none focus:border-cyan-400"
+                />
+              </div>
+
+              {pasteError && (
+                <div className="p-3 bg-rose-950/60 border border-rose-500/50 rounded-xl text-xs text-rose-300 flex items-center space-x-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{pasteError}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 border-t border-slate-800 flex items-center justify-end space-x-2 bg-slate-950/40">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPasteModalOpen(false);
+                  setPasteError(null);
+                }}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleExecutePasteImport}
+                disabled={!pastedJsonText.trim()}
+                className="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-600/30 cursor-pointer flex items-center space-x-1.5"
+              >
+                <Check className="w-4 h-4" />
+                <span>Proses & Impor ke Pelanggan</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

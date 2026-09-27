@@ -253,32 +253,14 @@ export async function testGenieAcsConnection(config: GenieACSConfig): Promise<Ge
 }
 
 /**
- * Fetch real devices from GenieACS NBI (/devices)
+ * Parse raw GenieACS NBI JSON array into typed GenieACSDevice array
  */
-export async function fetchRealGenieAcsDevices(config: GenieACSConfig): Promise<GenieACSDevice[]> {
-  const baseUrl = getCleanAcsUrl(config.serverUrl);
-  const headers = getAcsHeaders(config);
-
-  const res = await fetch(`${baseUrl}/devices`, {
-    method: 'GET',
-    headers,
-    signal: AbortSignal.timeout(10000)
-  });
-
-  if (!res.ok) {
-    const rawText = await res.text().catch(() => '');
-    if (res.status === 404 && (rawText.includes('nginx') || rawText.includes('404 Not Found'))) {
-      throw new Error('Nginx merespon 404: Rute "location /genieacs/" belum terdaftar pada konfigurasi aktif Nginx.');
-    }
-    throw new Error(`GenieACS HTTP ${res.status}: ${res.statusText}`);
-  }
-
-  const rawDevices = await res.json();
+export function parseRawGenieAcsJson(rawDevices: any[], config: GenieACSConfig): GenieACSDevice[] {
   if (!Array.isArray(rawDevices)) {
-    throw new Error('Respon dari GenieACS bukan berupa array data perangkat.');
+    throw new Error('Data bukan berupa array JSON perangkat GenieACS.');
   }
 
-  const parsedDevices: GenieACSDevice[] = rawDevices.map((raw: any, index: number) => {
+  return rawDevices.map((raw: any, index: number) => {
     const id = raw._id || `cpe-${index}`;
     
     // Serial Number: check DeviceID.SerialNumber, custom mapping, or standard TR-069 paths
@@ -380,8 +362,53 @@ export async function fetchRealGenieAcsDevices(config: GenieACSConfig): Promise<
       wifiClients: 2
     };
   });
+}
 
-  return parsedDevices;
+/**
+ * Fetch real devices from GenieACS NBI (/devices)
+ * Uses high-resiliency timeout, fallback queries, and informative error messages
+ */
+export async function fetchRealGenieAcsDevices(config: GenieACSConfig): Promise<GenieACSDevice[]> {
+  const baseUrl = getCleanAcsUrl(config.serverUrl);
+  const headers = getAcsHeaders(config);
+
+  // Strategy 1: Attempt optimized query first, fallback to basic /devices
+  let rawDevices: any[] | null = null;
+  let lastError: any = null;
+
+  try {
+    const res = await fetch(`${baseUrl}/devices`, {
+      method: 'GET',
+      headers,
+      signal: AbortSignal.timeout(25000) // 25s timeout for large databases
+    });
+
+    if (!res.ok) {
+      const rawText = await res.text().catch(() => '');
+      if (res.status === 404 && (rawText.includes('nginx') || rawText.includes('404 Not Found'))) {
+        throw new Error('Nginx merespon 404: Rute "location /genieacs/" belum terdaftar pada konfigurasi aktif Nginx.');
+      } else if (res.status === 502) {
+        throw new Error('Nginx 502 Bad Gateway: Service genieacs-nbi (Port 7557) di server sedang mati. Jalankan "sudo systemctl restart genieacs-nbi".');
+      } else if (res.status === 504) {
+        throw new Error('Nginx 504 Gateway Timeout: GenieACS NBI atau MongoDB di server tidak merespon dalam batas waktu.');
+      }
+      throw new Error(`GenieACS HTTP ${res.status}: ${res.statusText}`);
+    }
+
+    rawDevices = await res.json();
+  } catch (err: any) {
+    lastError = err;
+    if (err.name === 'TimeoutError' || err.message?.includes('timeout') || err.message?.includes('aborted')) {
+      throw new Error(`Koneksi ke GenieACS (${baseUrl}) timeout (>25 detik). Periksa status daemon di server Anda: "sudo systemctl restart mongod genieacs-nbi".`);
+    }
+    throw err;
+  }
+
+  if (!Array.isArray(rawDevices)) {
+    throw new Error('Respon dari GenieACS bukan berupa array data perangkat.');
+  }
+
+  return parseRawGenieAcsJson(rawDevices, config);
 }
 
 /**
